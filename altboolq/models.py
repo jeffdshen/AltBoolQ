@@ -8,7 +8,7 @@ from transformers import AutoModel
 
 def predict_argmax_mean(outputs, idxs, mask):
     # set padding outputs to 0
-    outputs = outputs.masked_fill(mask.unsqueeze(-1), 0.0)
+    outputs = outputs.masked_fill((mask == 0).unsqueeze(-1), 0.0)
 
     # take the mean of each class across the sequence
     outputs = torch.mean(outputs, dim=-2)
