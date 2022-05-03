@@ -150,6 +150,7 @@ def train_loop(
                 wandb.log(results_dict)
                 if is_best:
                     torch.save(model.state_dict(), f"./best.pth")
+    wandb.save("./best.pth")
     return best_meter.max
 
 
@@ -233,4 +234,7 @@ class NoopWandB:
         self.config = {}
 
     def log(self, *_args, **_kwargs):
+        pass
+
+    def save(self, *_args, **_kwargs):
         pass
