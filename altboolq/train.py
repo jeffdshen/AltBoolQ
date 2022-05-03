@@ -144,7 +144,7 @@ def train_loop(
                 }
                 results = [
                     "{}: {}".format(key, value).format(results_dict[key])
-                    for key, value in results_format
+                    for key, value in results_format.items()
                 ]
                 print(" | ".join(results) + best)
                 wandb.log(results_dict)
