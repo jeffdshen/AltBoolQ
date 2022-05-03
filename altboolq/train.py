@@ -117,10 +117,10 @@ def train_loop(
             # Validation
             if samples_since_eval >= config["eval_per_n_samples"]:
                 samples_since_eval = 0
-                valid_loss, valid_f1 = evaluate(
+                valid_loss, valid_acc = evaluate(
                     model, device, valid_loader, config
                 )
-                is_best = best_meter.add(valid_f1)
+                is_best = best_meter.add(valid_acc)
                 best = " (Best)" if is_best else ""
 
                 results = [
@@ -130,7 +130,7 @@ def train_loop(
                     f"train_loss: {train_loss_meter.avg:7.4f}",
                     f"valid_loss: {valid_loss:7.4f}",
                     f"train_error: {(train_acc_meter.acc):7.4f}",
-                    f"valid_error: {(valid_f1):7.4f}",
+                    f"valid_error: {(valid_acc):7.4f}",
                 ]
                 print(" | ".join(results) + best)
                 if is_best:

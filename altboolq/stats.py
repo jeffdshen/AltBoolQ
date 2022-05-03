@@ -100,6 +100,6 @@ class AccEMAMeter:
 
             self.count = 0
             self.total_inv_weight *= self.epoch_weight
-            self.f1 = (self.f1 * self.epoch_weight + acc * (1 - self.epoch_weight)) / (
+            self.acc = (self.acc * self.epoch_weight + acc * (1 - self.epoch_weight)) / (
                 1 - self.total_inv_weight
             )
