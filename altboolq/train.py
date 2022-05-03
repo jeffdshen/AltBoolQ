@@ -1,5 +1,6 @@
 import copy
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -73,6 +74,7 @@ def train_loop(
     train_loader,
     valid_loader,
     config,
+    wandb,
 ):
     step_num = 0
     samples_since_eval = 0
@@ -118,22 +120,34 @@ def train_loop(
             # Validation
             if samples_since_eval >= config["eval_per_n_samples"]:
                 samples_since_eval = 0
-                valid_loss, valid_acc = evaluate(
-                    model, device, valid_loader, config
-                )
+                valid_loss, valid_acc = evaluate(model, device, valid_loader, config)
                 is_best = best_meter.add(valid_acc)
                 best = " (Best)" if is_best else ""
 
+                results_dict = {
+                    "epoch": epoch,
+                    "sample": sample_num,
+                    "lr": optimizer.param_groups[0]["lr"],
+                    "train_loss": train_loss_meter.avg,
+                    "valid_loss": valid_loss,
+                    "train_error": train_acc_meter.acc,
+                    "valid_error": valid_acc,
+                }
+                results_format = {
+                    "epoch": "{:2d}",
+                    "sample": "{:6d}",
+                    "lr": "{:8.2e}",
+                    "train_loss": "{:7.4f}",
+                    "valid_loss": "{:7.4f}",
+                    "train_error": "{:7.4f}",
+                    "valid_error": "{:7.4f}",
+                }
                 results = [
-                    f"epoch: {epoch:2d}",
-                    f"sample: {sample_num:6d}",
-                    f"lr: {optimizer.param_groups[0]['lr']:8.2e}",
-                    f"train_loss: {train_loss_meter.avg:7.4f}",
-                    f"valid_loss: {valid_loss:7.4f}",
-                    f"train_error: {(train_acc_meter.acc):7.4f}",
-                    f"valid_error: {(valid_acc):7.4f}",
+                    "{}: {}".format(key, value).format(results_dict[key])
+                    for key, value in results_format
                 ]
                 print(" | ".join(results) + best)
+                wandb.log(results_dict)
                 if is_best:
                     torch.save(model.state_dict(), f"./best.pth")
     return best_meter.max
@@ -156,14 +170,10 @@ def get_boolq_dataset(df, tokenizer, config, shuffle):
     return dataset, loader
 
 
-def train(train_df, valid_df, config):
+def train(train_df, valid_df, config, wandb):
     tokenizer = AutoTokenizer.from_pretrained(config["model_path"])
-    _, train_loader = get_boolq_dataset(
-        train_df, tokenizer, config, shuffle=True
-    )
-    _, valid_loader = get_boolq_dataset(
-        valid_df, tokenizer, config, shuffle=False
-    )
+    _, train_loader = get_boolq_dataset(train_df, tokenizer, config, shuffle=True)
+    _, valid_loader = get_boolq_dataset(valid_df, tokenizer, config, shuffle=False)
 
     print(f"Loading model: {config['model_path']}")
     model = BoolQModel(
@@ -196,6 +206,7 @@ def train(train_df, valid_df, config):
         train_loader,
         valid_loader,
         config,
+        wandb,
     )
 
 
@@ -203,12 +214,23 @@ def get_df(dfs, config):
     return dfs[config["train_df"]], dfs[config["valid_df"]]
 
 
-def run(dfs, config):
+def run(dfs, config, wandb):
     config = copy.deepcopy(config)
+    wandb.config = config
     set_seed(config["seed"])
     set_environ()
     print(f"Config: {json.dumps(config, indent=4, sort_keys=True)}")
     train_df, valid_df = get_df(dfs, config)
 
-    best = train(train_df, valid_df, config)
+    best = train(train_df, valid_df, config, wandb)
+    wandb.run.summary["best_error"] = best
     print(f"Best: {best}")
+
+
+class NoopWandB:
+    def __init__(self):
+        self.run = SimpleNamespace(summary={})
+        self.config = {}
+
+    def log(self, *_args, **_kwargs):
+        pass
