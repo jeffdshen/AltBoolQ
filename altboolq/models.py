@@ -25,13 +25,11 @@ class FF(nn.Module):
         super().__init__()
         self.ff_linear = nn.Linear(dim, ff_dim)
         self.activation = F.gelu
-        self.layer_norm = nn.LayerNorm(ff_dim)
         self.output = nn.Linear(ff_dim, output_dim)
 
     def forward(self, x):
         x = self.ff_linear(x)
         x = self.activation(x)
-        x = self.layer_norm(x)
         x = self.output(x)
         return x
 
@@ -57,6 +55,26 @@ class SoftmaxHead(nn.Module):
         return predict_argmax_mean(z, x.overflow_to_sample_mapping, x.attention_mask)
 
 
+class ClsHead(nn.Module):
+    def __init__(self, dim, ff_dim, output_dim, ignore_idx=-1):
+        super().__init__()
+        self.ff = FF(dim, ff_dim, output_dim)
+        self.loss = nn.CrossEntropyLoss(ignore_index=ignore_idx)
+        self.ignore_idx = ignore_idx
+
+    def forward(self, x, mask):
+        x = x[:, 0, :].unsqueeze(1)
+        x = self.ff(x)
+        return x
+
+    def get_loss(self, z, y, x):
+        return self.loss(z.transpose(1, -1), y.transpose(1, -1))
+
+    @staticmethod
+    def get_pred(z, x):
+        return predict_argmax_mean(z, x.overflow_to_sample_mapping, x.attention_mask)
+
+
 class BoolQModel(nn.Module):
     def __init__(self, path, head, dropout=None):
         super().__init__()
@@ -73,6 +91,8 @@ class BoolQModel(nn.Module):
         hidden_size = config.hidden_size
         if head == "softmax":
             self.head = SoftmaxHead(hidden_size, hidden_size, output_dim=2)
+        elif head == "cls":
+            self.head = ClsHead(hidden_size, hidden_size, output_dim=2)
         else:
             raise RuntimeError("Unknown model head")
 

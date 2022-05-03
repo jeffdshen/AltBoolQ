@@ -90,7 +90,8 @@ def train_loop(
         # Step
         if (step_num + 1) % config["gradient_accumulation"] == 0:
             scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(model.parameters(), config["max_grad_norm"])
+            if config["max_grad_norm"] is not None:
+                nn.utils.clip_grad_norm_(model.parameters(), config["max_grad_norm"])
             scaler.step(optimizer)
             scaler.update()
             scheduler.step()
