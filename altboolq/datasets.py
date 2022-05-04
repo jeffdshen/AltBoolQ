@@ -75,6 +75,11 @@ def score(preds_batch, labels_batch):
     return confusion
 
 
+def get_open_df(df):
+    df = df.copy(deep=True)
+    df["passage"] = df["passage"].apply(lambda _: "")
+    return df
+
 def get_dfs():
     boolq = hf_datasets.load_dataset("super_glue", "boolq")
     dfs = {
@@ -82,4 +87,8 @@ def get_dfs():
         "boolq_valid": boolq["validation"].to_pandas(),
         "boolq_test": boolq["test"].to_pandas(),
     }
+    dfs["open_boolq_train"] = get_open_df(dfs["boolq_train"])
+    dfs["open_boolq_valid"] = get_open_df(dfs["boolq_valid"])
+    dfs["open_boolq_test"] = get_open_df(dfs["boolq_test"])
+
     return dfs
