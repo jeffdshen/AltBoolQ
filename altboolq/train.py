@@ -217,7 +217,7 @@ def get_df(dfs, config):
 
 def run(dfs, config, wandb):
     config = copy.deepcopy(config)
-    wandb.config = config
+    wandb.config.update(config)
     set_seed(config["seed"])
     set_environ()
     print(f"Config: {json.dumps(config, indent=4, sort_keys=True)}")

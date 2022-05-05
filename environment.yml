@@ -15,4 +15,6 @@ dependencies:
   - datasets
   - tokenizers
   - scikit-learn
+  - matplotlib
   - ipykernel
+  - wandb
