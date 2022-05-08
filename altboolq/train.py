@@ -38,7 +38,7 @@ def forward_backward(model, example, model_batch_size, device, backward):
 
     pred = model.get_pred(z_batch, x_batch)
     scores = score(pred, labels)
-    return np.average(total_loss), scores
+    return np.average(total_loss), pred, scores
 
 
 def noop_backward(_):
@@ -55,7 +55,7 @@ def evaluate(model, device, loader, config):
             example = to_device(example, device)
             batch_size, example = example[0], example[1:]
 
-            loss, scores = forward_backward(
+            loss, _, scores = forward_backward(
                 model, example, config["model_batch_size"], device, noop_backward
             )
 
@@ -107,7 +107,7 @@ def train_loop(
             batch_size, example = example[0], example[1:]
 
             # Forward
-            loss, scores = forward_backward(
+            loss, _, scores = forward_backward(
                 model, example, config["model_batch_size"], device, backward
             )
             sample_num += batch_size
