@@ -8,3 +8,5 @@ from .stats import EMAMeter, AverageMeter, MinMeter, AccEMAMeter, MaxMeter, AccM
 from .train import run, NoopWandB
 
 from .infer import download_models, select_model, predict
+
+from .augment import run_augment

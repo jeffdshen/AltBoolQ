@@ -18,3 +18,6 @@ dependencies:
   - matplotlib
   - ipykernel
   - wandb
+  - gensim
+  - nltk
+  - spacy

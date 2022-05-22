@@ -1,14 +1,16 @@
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
+from tqdm import tqdm
 import numpy as np
+import pandas as pd
 from scipy.sparse.csgraph import connected_components
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 def same_case(a, b):
     if a.lower() == a:
-        return a.lower()
+        return b.lower()
     if a.upper() == a:
         return b.upper()
     if a[0].upper() == a[0]:
@@ -155,3 +157,137 @@ class Selector:
                 break
 
         return results
+
+
+def get_group_accuracy(doc, selection, nlp):
+    tokens = nlp(doc)
+    groups = {word: i for i, group in enumerate(selection) for word in group}
+    lemma_groups = defaultdict(set)
+    for token in tokens:
+        group_num = groups[token.lower_] if token.lower_ in groups else -1
+        lemma_groups[token.lemma_.lower()].add((token.lower_, group_num))
+
+    success = 0
+    total = 0
+    for _, lemma_group in lemma_groups.items():
+        counter = Counter(group_num for _, group_num in lemma_group)
+        value, majority = counter.most_common(1)[0]
+        count = sum(counter.values())
+        if majority == count and value == -1:
+            continue
+        success += majority
+        total += count
+    return success, total
+
+
+def evaluate_selection(docs, selections, nlp):
+    lengths = np.array([len(s) for s in selections], dtype=int)
+    results = {
+        "non_empty": np.mean(lengths > 0),
+        "avg_length": np.mean(lengths),
+        "max_length": np.max(lengths),
+    }
+
+    group_accuracy = []
+    for doc, selection in zip(docs, selections):
+        success, total = get_group_accuracy(doc, selection, nlp)
+        group_accuracy.append(1.0 if total == 0 else success / total)
+
+    results["group_accuracy"] = np.mean(group_accuracy)
+    results["exact_group_accuracy"] = np.mean(np.array(group_accuracy) == 1.0)
+    return results
+
+
+def select_dataset(df, config, glove):
+    task_format = "{}\n{}"
+    docs = [
+        task_format.format(row["passage"], row["question"]) for _, row in df.iterrows()
+    ]
+    _, analyzer, tfidf_weights = get_tfidf(docs)
+    _, _, _ = get_doc_freqs(docs, analyzer)
+    group_weight = GroupWeight(glove, alpha=config["alpha"])
+    grouper = Grouper(group_weight, grouping_cutoff=config["grouping_cutoff"])
+    selector = Selector(
+        tfidf_cutoff=config["tfidf_cutoff"],
+        freq_cutoff=config["freq_cutoff"],
+        group_size=config["group_size"],
+    )
+    selections = []
+    for i in tqdm(range(len(docs))):
+        doc = docs[i]
+        term_freqs, term_counts, _ = get_term_freqs(doc, analyzer)
+        groups = grouper(term_counts)
+        selection = selector.select(groups, tfidf_weights[i], term_freqs)
+        selections.append(selection)
+
+    return docs, selections
+
+
+def augment_dataset(df, word_maps):
+    rows = []
+    for index, word_map in word_maps:
+        row = df.iloc[index].copy(deep=True)
+        row["passage"] = replace_words(row["passage"], word_map)
+        row["question"] = replace_words(row["question"], word_map)
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def none_filter(doc, selection):
+    return True
+
+
+class GroupAccuracyFilter:
+    def __init__(self, nlp):
+        self.nlp = nlp
+
+    def __call__(self, doc, selection):
+        success, total = get_group_accuracy(doc, selection, self.nlp)
+        return success == total
+
+
+def make_mask_word_maps(config, docs, selections, nlp):
+    if config["filter"] == None:
+        filterer = none_filter
+    elif config["filter"] == "group_accuracy":
+        filterer = GroupAccuracyFilter(nlp)
+    else:
+        raise ValueError('config["filter"] is invalid')
+
+    word_maps = []
+    for index, (doc, selection) in enumerate(zip(docs, selections)):
+        if not filterer(doc, selection):
+            continue
+
+        word_map = {}
+        for group in selection:
+            for word in group:
+                word_map[word] = "redacted"
+
+        word_maps.append((index, word_map))
+    return word_maps
+
+
+def make_word_maps(df, config, docs, selections, nlp):
+    if config["resample"] == "mask":
+        return make_mask_word_maps(config, docs, selections, nlp)
+    else:
+        raise ValueError('config["resample"] is invalid')
+
+
+def run_augment(dfs, config, loader, spacy):
+    df = dfs[config["df"]]
+
+    print("Loading glove and nlp...")
+    glove = loader.load(config["glove_path"])
+    nlp = spacy.load(config["nlp_path"])
+
+    print("Selecting word groups...")
+    docs, selections = select_dataset(df, config, glove)
+
+    print("Making word maps...")
+    word_maps = make_word_maps(df, config, docs, selections, nlp)
+
+    print("Augmenting dataset...")
+    return augment_dataset(df, word_maps)
