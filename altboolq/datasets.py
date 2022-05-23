@@ -1,4 +1,8 @@
+import json
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 
 import torch
 from torch.utils.data import Dataset
@@ -80,7 +84,8 @@ def get_open_df(df):
     df["passage"] = df["passage"].apply(lambda _: "")
     return df
 
-def get_dfs():
+
+def get_dfs(path=None):
     boolq = hf_datasets.load_dataset("super_glue", "boolq")
     dfs = {
         "boolq_train": boolq["train"].to_pandas(),
@@ -91,4 +96,21 @@ def get_dfs():
     dfs["open_boolq_valid"] = get_open_df(dfs["boolq_valid"])
     dfs["open_boolq_test"] = get_open_df(dfs["boolq_test"])
 
+    if path is not None:
+        path = Path(path)
+        for sub_path in path.iterdir():
+            data_path = sub_path / "data.csv"
+            if not data_path.exists():
+                continue
+            name = sub_path.name
+            dfs[name] = pd.read_csv(data_path)
+
     return dfs
+
+
+def write_df(config, df):
+    path = Path(config["name"])
+    path.mkdir(parents=True, exist_ok=True)
+    with open(path / "config.json", "w") as f:
+        json.dump(config, f, indent=4)
+    df.to_csv(path / "data.csv", index=False)
