@@ -286,6 +286,10 @@ def run_augment(dfs, config, loader, spacy):
     print("Selecting word groups...")
     docs, selections = select_dataset(df, config, glove)
 
+    print("Evaluating selections...")
+    results = evaluate_selection(docs, selections, nlp)
+    print(results)
+
     print("Making word maps...")
     word_maps = make_word_maps(df, config, docs, selections, nlp)
 
