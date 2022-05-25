@@ -1,19 +1,12 @@
-import os
 import copy
-import gc
 from pathlib import Path
 
 import torch
-import torch.cuda.amp as amp
-from torch.utils.data import DataLoader
-import numpy as np
-import pandas as pd
 
 from transformers import AutoTokenizer
 
-from .datasets import BoolQDataset, split_batch, score, to_device
+from .datasets import to_device
 from .models import BoolQModel
-from .stats import EMAMeter, AverageMeter, MaxMeter, AccMeter, AccEMAMeter
 from .train import get_boolq_dataset, forward_backward, noop_backward
 
 from transformers import AutoTokenizer
@@ -24,6 +17,7 @@ def download_models(wandb, project, name, root="./models/", per_page=100, filter
     runs = api.runs(project, filters=filters, per_page=per_page)
     models = {}
     root_dir = Path(root)
+    root_dir.mkdir(parents=True, exist_ok=True)
     for run in runs:
         model = {}
         model["run_id"] = run.id
