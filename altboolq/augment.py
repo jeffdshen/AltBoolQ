@@ -51,9 +51,11 @@ def cosine_similarity(a, b):
 
 
 class GroupWeight:
-    def __init__(self, glove, alpha):
+    def __init__(self, glove, doc_freqs, alpha, max_doc_freq):
         self.glove = glove
         self.alpha = alpha
+        self.doc_freqs = doc_freqs
+        self.max_doc_freq = max_doc_freq
 
     def __call__(self, word_count_i, word_count_j):
         word_i, count_i = word_count_i
@@ -61,6 +63,10 @@ class GroupWeight:
         if word_i == word_j:
             return 1.0
         if word_i not in self.glove or word_j not in self.glove:
+            return 0.0
+        if self.doc_freqs[word_i] > self.max_doc_freq:
+            return 0.0
+        if self.doc_freqs[word_j] > self.max_doc_freq:
             return 0.0
         sim = cosine_similarity(self.glove[word_i], self.glove[word_j])
         count_ij = np.log(min(count_i, count_j))
@@ -129,22 +135,41 @@ def get_tfidf(docs):
     return tfidf, analyzer, weights
 
 
+class IsOOV:
+    def __init__(self, glove):
+        self.glove = glove
+
+    def __call__(self, word):
+        if self.glove is None:
+            return False
+        return word not in self.glove
+
+
 class Selector:
-    def __init__(self, tfidf_cutoff, freq_cutoff, group_size):
+    def __init__(self, tfidf_cutoff, freq_cutoff, group_size, min_term_count, is_oov):
         self.tfidf_cutoff = tfidf_cutoff
         self.freq_cutoff = freq_cutoff
         self.group_size = group_size
+        self.min_term_count = min_term_count
+        self.is_oov = is_oov
 
-    def select(self, groups, tfidf_weights, term_freqs):
+    def select(self, groups, tfidf_weights, term_freqs, term_counts):
         total_freq = 0
         results = []
         seen = set()
         for score, word in tfidf_weights:
+            if score < self.tfidf_cutoff:
+                break
+
             if word in seen:
                 continue
 
-            if score < self.tfidf_cutoff:
+            if term_counts[word] < self.min_term_count:
                 continue
+
+            if self.is_oov(word):
+                continue
+
             group = groups[word]
             if len(group) > self.group_size:
                 continue
@@ -180,7 +205,7 @@ def get_group_accuracy(doc, selection, nlp):
     return success, total
 
 
-def evaluate_selection(docs, selections, nlp):
+def evaluate_selection(docs, selections, analyzer, nlp):
     lengths = np.array([len(s) for s in selections], dtype=int)
     results = {
         "non_empty": np.mean(lengths > 0),
@@ -189,10 +214,16 @@ def evaluate_selection(docs, selections, nlp):
     }
 
     group_accuracy = []
-    for doc, selection in zip(docs, selections):
+    selection_freqs = []
+    for doc, selection in tqdm(zip(docs, selections)):
         success, total = get_group_accuracy(doc, selection, nlp)
         group_accuracy.append(1.0 if total == 0 else success / total)
+        term_freqs, _, _ = get_term_freqs(doc, analyzer)
+        selection_freqs.append(
+            sum(term_freqs[word] for group in selection for word in group)
+        )
 
+    results["avg_freq"] = np.mean(selection_freqs)
     results["group_accuracy"] = np.mean(group_accuracy)
     results["exact_group_accuracy"] = np.mean(np.array(group_accuracy) == 1.0)
     return results
@@ -204,23 +235,28 @@ def select_dataset(df, config, glove):
         task_format.format(row["passage"], row["question"]) for _, row in df.iterrows()
     ]
     _, analyzer, tfidf_weights = get_tfidf(docs)
-    _, _, _ = get_doc_freqs(docs, analyzer)
-    group_weight = GroupWeight(glove, alpha=config["alpha"])
+    doc_freqs, _, _ = get_doc_freqs(docs, analyzer)
+    group_weight = GroupWeight(
+        glove, doc_freqs, alpha=config["alpha"], max_doc_freq=config["max_doc_freq"]
+    )
     grouper = Grouper(group_weight, grouping_cutoff=config["grouping_cutoff"])
+    is_oov = IsOOV(glove if config["redact_oov"] else None)
     selector = Selector(
         tfidf_cutoff=config["tfidf_cutoff"],
         freq_cutoff=config["freq_cutoff"],
         group_size=config["group_size"],
+        min_term_count=config["min_term_count"],
+        is_oov=is_oov,
     )
     selections = []
     for i in tqdm(range(len(docs))):
         doc = docs[i]
         term_freqs, term_counts, _ = get_term_freqs(doc, analyzer)
         groups = grouper(term_counts)
-        selection = selector.select(groups, tfidf_weights[i], term_freqs)
+        selection = selector.select(groups, tfidf_weights[i], term_freqs, term_counts)
         selections.append(selection)
 
-    return docs, selections
+    return docs, selections, analyzer
 
 
 def augment_dataset(df, word_maps):
@@ -247,16 +283,24 @@ class GroupAccuracyFilter:
         return success == total
 
 
-def make_mask_word_maps(config, docs, selections, nlp):
-    if config["filter"] == None:
-        filterer = none_filter
-    elif config["filter"] == "group_accuracy":
-        filterer = GroupAccuracyFilter(nlp)
-    else:
-        raise ValueError('config["filter"] is invalid')
+def get_oov_words(doc, analyzer, glove):
+    return [word for word in set(analyzer(doc)) if word not in glove]
 
+
+class GetOOV:
+    def __init__(self, glove):
+        self.glove = glove
+
+    def __call__(self, words):
+        if self.glove is None:
+            return []
+
+        return [word for word in set(words) if word not in self.glove]
+
+
+def make_mask_word_maps(docs, selections, analyzer, filterer, get_oov):
     word_maps = []
-    for index, (doc, selection) in enumerate(zip(docs, selections)):
+    for index, (doc, selection) in tqdm(enumerate(zip(docs, selections))):
         if not filterer(doc, selection):
             continue
 
@@ -265,18 +309,50 @@ def make_mask_word_maps(config, docs, selections, nlp):
             for word in group:
                 word_map[word] = "redacted"
 
+        for word in get_oov(analyzer(doc)):
+            word_map[word] = "redacted"
+
         word_maps.append((index, word_map))
     return word_maps
 
 
-def make_word_maps(df, config, docs, selections, nlp):
+def make_gmm_word_maps(config, docs, selections, glove, analyzer, filterer, get_oov):
+    raise NotImplementedError()
+
+
+def make_word_maps(df, config, docs, selections, glove, nlp, analyzer):
+    if config["filter"] == None:
+        filterer = none_filter
+    elif config["filter"] == "group_accuracy":
+        filterer = GroupAccuracyFilter(nlp)
+    else:
+        raise ValueError('config["filter"] is invalid')
+
+    get_oov = GetOOV(glove if config["redact_oov"] else None)
+
     if config["resample"] == "mask":
-        return make_mask_word_maps(config, docs, selections, nlp)
+        return make_mask_word_maps(docs, selections, analyzer, filterer, get_oov)
+    elif config["resample"] == "gmm":
+        return make_gmm_word_maps(
+            config, docs, selections, glove, analyzer, filterer, get_oov
+        )
     else:
         raise ValueError('config["resample"] is invalid')
 
 
+def set_defaults(config):
+    if "min_term_count" not in config:
+        config["min_term_count"] = 0
+
+    if "max_doc_freq" not in config:
+        config["max_doc_freq"] = 1.0
+
+    if "redact_oov" not in config:
+        config["redact_oov"] = False
+
+
 def run_augment(dfs, config, loader, spacy):
+    set_defaults(config)
     df = dfs[config["df"]]
 
     print("Loading glove and nlp...")
@@ -284,14 +360,14 @@ def run_augment(dfs, config, loader, spacy):
     nlp = spacy.load(config["nlp_path"])
 
     print("Selecting word groups...")
-    docs, selections = select_dataset(df, config, glove)
+    docs, selections, analyzer = select_dataset(df, config, glove)
 
     print("Evaluating selections...")
-    results = evaluate_selection(docs, selections, nlp)
+    results = evaluate_selection(docs, selections, analyzer, nlp)
     print(results)
 
     print("Making word maps...")
-    word_maps = make_word_maps(df, config, docs, selections, nlp)
+    word_maps = make_word_maps(df, config, docs, selections, glove, nlp, analyzer)
 
     print("Augmenting dataset...")
     return augment_dataset(df, word_maps)
