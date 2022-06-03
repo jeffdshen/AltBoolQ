@@ -341,14 +341,9 @@ def make_word_maps(df, config, docs, selections, glove, nlp, analyzer):
 
 
 def set_defaults(config):
-    if "min_term_count" not in config:
-        config["min_term_count"] = 0
-
-    if "max_doc_freq" not in config:
-        config["max_doc_freq"] = 1.0
-
-    if "redact_oov" not in config:
-        config["redact_oov"] = False
+    config.setdefault("min_term_count", 0)
+    config.setdefault("max_doc_freq", 1.0)
+    config.setdefault("redact_oov", False)
 
 
 def run_augment(dfs, config, loader, spacy):
