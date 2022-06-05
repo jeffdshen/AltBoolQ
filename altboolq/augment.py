@@ -1,6 +1,5 @@
 import re
 from collections import Counter, defaultdict
-import random
 
 from tqdm import tqdm
 import numpy as np
