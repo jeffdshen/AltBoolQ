@@ -425,8 +425,8 @@ def make_gmm_word_maps(config, docs, selections, glove, analyzer, filterer, get_
 
     results = {
         "exact_cluster_match": np.mean(np.array(all_cluster_scores) == 1.0),
-        "avg_cluster_match": np.mean(all_cluster_scores),
-        "avg_sim_scores": np.mean(all_sim_scores),
+        "avg_cluster_match": np.nanmean(all_cluster_scores),
+        "avg_sim_scores": np.nanmean(all_sim_scores),
     }
     print(results)
     return word_maps
