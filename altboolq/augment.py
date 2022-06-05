@@ -1,11 +1,13 @@
 import re
 from collections import Counter, defaultdict
+import random
 
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from scipy.sparse.csgraph import connected_components
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.mixture import GaussianMixture
 
 
 def same_case(a, b):
@@ -316,8 +318,119 @@ def make_mask_word_maps(docs, selections, analyzer, filterer, get_oov):
     return word_maps
 
 
+def normalize(x):
+    return x / np.linalg.norm(x, axis=-1, keepdims=True)
+
+
+def get_vecs(glove, words):
+    return np.array([glove[word] for word in words])
+
+
+def get_unit_vecs(glove, words):
+    return normalize(get_vecs(glove, words))
+
+
+def gmm_cluster(config, selections, glove):
+    gmm = GaussianMixture(
+        n_components=config["gmm_n_components"],
+        covariance_type=config["gmm_covariance_type"],
+        n_init=config["gmm_n_init"],
+        random_state=config["gmm_random_state"],
+        verbose=True,
+    )
+    words = [word for selection in selections for group in selection for word in group]
+    words = [word for word in words if word in glove]
+    gmm_vecs = get_unit_vecs(glove, words)
+    clusters = gmm.fit_predict(gmm_vecs)
+    cluster_map = {}
+    for cluster in range(np.max(clusters) + 1):
+        cluster_map[cluster] = np.array(words)[clusters == cluster]
+    return gmm, cluster_map
+
+
+def most_similar_group(glove, words, cand_words, sample_word):
+    all_new_words = []
+    for cand_word in cand_words:
+        new_words = []
+        total_score = 0.0
+        for word in words:
+            if word == cand_word:
+                new_word, score = sample_word, 1.0
+            elif sample_word == cand_word:
+                new_word, score = word, 1.0
+            else:
+                new_word, score = glove.most_similar(
+                    positive=[sample_word, word], negative=[cand_word], topn=1
+                )[0]
+            new_words.append(new_word)
+            total_score += score
+        total_score /= len(words)
+        all_new_words.append((total_score, new_words))
+    score, new_words = max(all_new_words)
+    return new_words, score
+
+
+def gmm_resample(words, gmm, cluster_map, glove, rng):
+    clusters = gmm.predict(get_unit_vecs(glove, words))
+    sample_words = [
+        (cluster, rng.choice(cluster_map[cluster])) for cluster in set(clusters)
+    ]
+    rng.shuffle(sample_words)
+
+    all_new_words = []
+
+    for cluster, sample_word in sample_words:
+        cluster_words = np.array(words)[clusters == cluster]
+        new_words, score = most_similar_group(glove, words, cluster_words, sample_word)
+        new_clusters = gmm.predict(get_unit_vecs(glove, new_words))
+        if np.array_equal(clusters, new_clusters):
+            return new_words, 1.0, score
+        cluster_score = (clusters == new_clusters).mean()
+        all_new_words.append((cluster_score, score, new_words))
+
+    cluster_score, score, new_words = max(all_new_words)
+    return new_words, cluster_score, score
+
+
 def make_gmm_word_maps(config, docs, selections, glove, analyzer, filterer, get_oov):
-    raise NotImplementedError()
+    gmm, cluster_map = gmm_cluster(config, selections, glove)
+
+    rng = np.random.default_rng(seed=config["seed"])
+
+    all_cluster_scores = []
+    all_sim_scores = []
+    word_maps = []
+    for index, (doc, selection) in tqdm(enumerate(zip(docs, selections))):
+        if not filterer(doc, selection):
+            continue
+
+        cluster_scores = []
+        sim_scores = []
+        word_map = {}
+        for group in selection:
+            new_group, cluster_score, sim_score = gmm_resample(
+                group, gmm, cluster_map, glove, rng
+            )
+            for word, new_word in zip(group, new_group):
+                word_map[word] = new_word
+            cluster_scores.append(cluster_score)
+            sim_scores.append(sim_score)
+
+        all_cluster_scores.append(np.mean(cluster_scores))
+        all_sim_scores.append(np.mean(sim_scores))
+
+        for word in get_oov(analyzer(doc)):
+            word_map[word] = "redacted"
+
+        word_maps.append((index, word_map))
+
+    results = {
+        "exact_cluster_match": np.mean(np.array(all_cluster_scores) == 1.0),
+        "avg_cluster_match": np.mean(all_cluster_scores),
+        "avg_sim_scores": np.mean(all_sim_scores),
+    }
+    print(results)
+    return word_maps
 
 
 def make_word_maps(df, config, docs, selections, glove, nlp, analyzer):
