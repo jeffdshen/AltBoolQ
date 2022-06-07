@@ -36,7 +36,7 @@ def select_model(models, extract, value):
         config = model["config"]
         state = extract(config)
         if state == value:
-            if model is not None:
+            if result is not None:
                 return None
             result = model
     return copy.deepcopy(result)
