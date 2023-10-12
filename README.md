@@ -5,9 +5,9 @@
 This repository contains the code for the [Stanford CS229: Machine Learning](https://cs229.stanford.edu/) final project titled "Can Pretrained Language Models Understand Without Using Prior World Knowledge?", which won a CS229 Best Project Award in [Spring 2022](https://cs229.stanford.edu/syllabus-spring2022.html). The final report can be found [here](./CS229__Project_Final_Report.pdf).
 
 The project introduces a method for randomizing entities in examples for QA tasks so that models cannot solely rely on world knowledge to answer questions. **AltBoolQ** is the resulting dataset from applying the method to the [BoolQ](https://github.com/google-research-datasets/boolean-questions) dataset. Several findings from the project include:
-1. AltBoolQ is more difficult than BoolQ, and training on AltBoolQ can boost performance on the BoolQ dataset.
+1. AltBoolQ is more difficult than BoolQ, and mixing in training on AltBoolQ can boost performance on the BoolQ dataset.
 2. BoolQ may include statistical cues that make it too easy. A possible diagnostic is to mask out relevant entities in text, which should drop model performance to the majority class if there are no statistical regularities in the language. There is *surprisingly* little drop in model performance on BoolQ.
-3. Models finetuned on only BoolQ transfer well to AltBoolQ with no additional training. This suggests there is little reliance on world knowledge.
+3. Models finetuned on only BoolQ transfer well to AltBoolQ with *no additional training*. This robustness is surprising and suggests models are relying not on world knowledge, but on language understanding or statistical cues.
 
 ## Results
 
@@ -42,7 +42,7 @@ RoBERTa-large | BoolQ + AltBoolQ | 85.60 | **83.23** | 84.48
 
 Training on BoolQ generalizes to AltBoolQ and vice versa, suggesting little reliance on world knowledge. For BERT models, adding in AltBoolQ during training boosts performance.
 
-## Example example
+## Example
 
 Our method uses non-deep-learning approaches to randomize entities while attempting to preserve internal consistency. This can produce new examples that are factually false or weird, but that are still logically valid. For example:
 
