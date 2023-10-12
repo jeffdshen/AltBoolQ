@@ -59,7 +59,7 @@ Question: is the global administration the same as the vocal administration
 Answer: false
 ```
 
-As a note, redacting for MaskedBoolQ might make result in:
+As a note, redacting for MaskedBoolQ might result in:
 
 ```
 Passage: Redacted redacted of the United States -- The redacted redacted are composed of three levels of redacted. The Redacted Redacted of the United States is the redacted of last resort.
@@ -67,7 +67,7 @@ Question: is the redacted redacted the same as the redacted redacted
 Answer: false
 ```
 
-On its face, the passage and question are now unanswerable, but if one exploits statistical cues in the dataset, one could still guess correctly. This may suggest that the dataset is too easy.
+On its face, this renders the passage and question unanswerable, but if one exploits statistical cues in the dataset, one could still guess correctly. This suggests that the dataset may be too easy.
 
 ## Method
 
@@ -75,7 +75,7 @@ An overview of the method:
 
 1. **Grouping**. We use [fastText](https://fasttext.cc/) word embeddings to group entities with relationships that we cannot break, e.g. different forms of the same noun.
 2. **Selection**. We use TF-IDF (Term Frequency-Inverse Document Frequency) for extracting relevant entities specific to each document.
-3. **Randomization**. We use Gaussian Mixture Models to cluster the word embeddings. We use the clusters to resample words, and grouped words are shifted together, i.e. via word analogy, to preserve relationships within each group.
+3. **Randomization**. We use Gaussian mixture models to cluster the word embeddings. We use the clusters to resample words, and grouped words are shifted together, i.e. via word analogy, to preserve relationships within each group.
 
 ## Running experiments
 
